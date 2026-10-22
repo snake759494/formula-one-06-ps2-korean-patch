@@ -130,7 +130,8 @@ def main():
         kfont.preview(f, 'work/out/font_%s.png' % fn)
         print('  font', fn, f.W, f.H, len(newfont[wad.h('Fonts/%s.bft' % fn)]))
     repl = dict(newblf); repl.update(newfont)
-    if not os.environ.get('NO_DB'): repl[0x873A829C] = newdb
+    # 드라이버·팀 DB에 한글을 넣으면 퀵 레이스 로딩이 멈춘다(v1.1 제보). DB_KO=1 일 때만 적용
+    if os.environ.get('DB_KO'): repl[0x873A829C] = newdb
     # 언어 선택 메뉴 스크립트: ENGLISH -> 한국어 (u8 형식 4, u32 길이(NUL 포함), 문자열)
     old = b'\x04\x08\x00\x00\x00ENGLISH\x00'
     ko = enc('한국어 ').encode('utf-8')    # 길이 고정(7바이트): 재배정한 한글은 2바이트 -> '한국어 '
