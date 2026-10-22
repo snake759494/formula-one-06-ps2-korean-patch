@@ -73,8 +73,8 @@ def _fit(new, old, alts=()):
         if c and len(c.encode('utf-8')) <= lim: return c
     return old
 
-SAFE_DRV = {3}      # 표시 전용(짧은 표기, 표시용 성). 이름·성은 내부 키로 쓰여 바꾸면 레이스 로딩이 멈춘다
-SAFE_TEAM = {2}
+SAFE_DRV = {3, 5}      # 표시 전용(짧은 표기, 표시용 성). 이름·성은 내부 키로 쓰여 바꾸면 레이스 로딩이 멈춘다
+SAFE_TEAM = {1, 2}
 
 def convert(ss):
     orig = list(ss)
@@ -87,7 +87,7 @@ def convert(ss):
             alts = []
             if drv and i == 3 and ' ' in n: alts = [n.split(' ', 1)[1]]                    # 'F. 알론소' -> '알론소'
             if i in (6, 9) and ' ' in n: alts = [n.split(' ')[-1]]                         # '스페인 오비에도' -> '오비에도'
-            ss[i] = n if os.environ.get('NAMES_NOFIT') else _fit(n, o, alts)
+            ss[i] = _fit(n, o, alts) if os.environ.get("NAMES_FIT") else n
     return ss
 
 def _convert(ss):

@@ -19,14 +19,14 @@ TTF = {
 
 # 폰트별 설정: ttf, 한글 글자 크기(px, 정사각 상자), 셀 안 상단 여백(top), 기울임(shear), 자간 여유
 CONF = {
-    'eurostyleLargePx':  dict(ttf='neo_b',  size=19, top=2, shear=0, gap=1, boost=1.15),
-    'eurostyleMediumPx': dict(ttf='neo_b',  size=15, top=2, shear=0, gap=1, boost=1.15),
+    'eurostyleLargePx':  dict(ttf='neo_b',  size=14, top=2, ui=True, maxh=512, shear=0, gap=1, boost=1.15),
+    'eurostyleMediumPx': dict(ttf='neo_b',  size=14, top=2, ui=True, maxh=512, shear=0, gap=1, boost=1.15),
     'eurostyleSmallPx':  dict(ttf='neo_b',  size=13, top=1, shear=0, gap=1),
-    'fruitigerLarge':    dict(ttf='neo_r',  size=16, top=3, shear=0, gap=1, boost=1.1),
+    'fruitigerLarge':    dict(ttf='neo_r',  size=14, top=3, ui=True, maxh=512, shear=0, gap=1, boost=1.1),
     'fruitigerMedium':   dict(ttf='neo_b',  size=12, top=2, shear=0, gap=1, boost=1.15),
-    'fruitigerTiny':     dict(ttf='gm9',    size=10, top=0, shear=0, gap=1, pixel=True, maxw=256),
-    'Small':             dict(ttf='gm11',   size=11, top=2, shear=0, gap=1, pixel=True, maxw=256),
-    'tv2004_frb':        dict(ttf='neo_b',  size=14, top=3, shear=0, gap=1, boost=1.1),
+    'fruitigerTiny':     dict(ttf='gm9',    size=10, top=0, shear=0, gap=1, pixel=True, maxw=512),
+    'Small':             dict(ttf='gm11',   size=11, top=2, shear=0, gap=1, pixel=True, maxw=512, maxh=512),
+    'tv2004_frb':        dict(ttf='neo_b',  size=14, top=3, ui=True, maxh=512, shear=0, gap=1, boost=1.1),
 }
 
 def palette_alpha(f):
@@ -119,7 +119,8 @@ def canonical_palette(f):
         c[p + 4 * k:p + 4 * k + 4] = (rgb if k else b'\0\0\0') + bytes([new[k]])
     f.clut = bytes(c)
 
-def add_hangul(f, name, chars):
+def add_hangul(f, name, chars, codes=None):
+    """codes: 한글 -> 글꼴에 넣을 코드(레이스 쪽 코드는 U+2200 위 문자를 못 그려서 낮은 영역으로 옮겨 담음)"""
     conf = CONF[name]
     # 게임은 같은 계열 폰트끼리 CLUT 하나를 공유한다 → 계열 내 모든 팔레트에서 같은 투명도가 나오는 인덱스만 사용
     lut = robust_lut(name) if name in FAMILY else alpha_to_index(palette_alpha(f))
@@ -129,7 +130,9 @@ def add_hangul(f, name, chars):
     for ch in chars:
         a = render(str(list(CONF).index(name)) if tid else ch, conf)
         g = lut[np.clip(a, 0, 255).astype(np.uint8)]
-        glyphs.append((ord(ch), g))
+        if os.environ.get('PALTEST'):     # 팔레트 측정: 글자 칸을 인덱스 (코드 % 16) 으로 채움
+            g = np.full_like(g, lut[0]); g[conf['top']:conf['top'] + conf['size'], 1:-1] = ord(ch) % 16
+        glyphs.append((ord(codes[ch]) if codes else ord(ch), g))
     # 원본 사용 영역
     used_h = 0
     for c, g in f.glyphs.items():
@@ -157,7 +160,7 @@ def add_hangul(f, name, chars):
     while len(slots(W, H)) < len(glyphs):
         if W < MAXW and W <= H: W *= 2
         else: H *= 2
-        assert H <= 1024, (name, W, H)
+        assert H <= conf.get('maxh', 1024), (name, W, H)   # 레이스 쪽에서 쓰는 글꼴은 512x512 이하여야 한다(넘으면 VRAM 자리를 기다리며 멈춤)
     pos = slots(W, H)
     img = np.full((H, W), zero, np.uint8)
     img[:f.H, :f.W] = f.img
@@ -170,8 +173,9 @@ def add_hangul(f, name, chars):
 
     # 기존 글리프 UV 재계산 (텍스처 크기 변경)
     if (W, H) != (f.W, f.H):
+        newcodes = {c for c, _ in glyphs}
         for code, g in f.glyphs.items():
-            if code >= 0xAC00 and code <= 0xD7A3: continue
+            if code in newcodes: continue
             g[2] *= f.W / W; g[3] *= f.W / W
             y0 = (1 - g[5]) * f.H; y1 = (1 - g[4]) * f.H
             g[5] = 1 - y0 / H; g[4] = 1 - y1 / H

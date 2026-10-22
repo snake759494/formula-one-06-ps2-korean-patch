@@ -77,30 +77,45 @@ def main():
     os.makedirs('work/out', exist_ok=True)
     tr = load_translation()
     print('translations', len(tr))
+    # 0) 한글 코드 재배정: 레이스 쪽 텍스트 코드가 U+2200 위 문자를 그리지 못하고(빈칸), 드라이버 DB에 넣으면
+    #    레이스 로딩이 멈춘다. 쓰이는 한글을 대소문자가 없는 낮은 영역(2바이트 UTF-8)에 차례로 배정한다.
+    d, e = wad.read('work/orig/DATA2006/STARTUP.WAD'); m = {x[0]: x for x in e}
+    rawdb = lzss.get(d, m[0x873A829C])
+    db_ko = dbnames.rebuild(rawdb, names_db.convert)
+    used = set(''.join(tr.values())) | set('한국어')
+    for bl in dbnames.blocks(db_ko):
+        used |= set(db_ko[bl[1]:bl[2]].decode('utf-8'))
+    hangul = sorted(c for c in used if 0xAC00 <= ord(c) <= 0xD7A3)
+    if os.environ.get('LIMIT_HANGUL'): hangul = hangul[:int(os.environ['LIMIT_HANGUL'])]
+    slots = list(range(0x250, 0x370)) + list(range(0x590, 0x800))
+    assert len(hangul) <= len(slots), len(hangul)
+    cmap = {c: chr(slots[i]) for i, c in enumerate(hangul)}
+    def enc(s):
+        return ''.join(cmap.get(ch, ch) for ch in s)
+    # 레이스 쪽에서도 쓰는 글꼴(ui=True)에는 메뉴·시스템 텍스트(m·s 번호)와 드라이버·팀 이름 글자만 넣는다
+    ui = set('한국어')
+    for fn_ in glob.glob('translation/ko/ko_*.tsv'):
+        for l in open(fn_, encoding='utf-8').read().splitlines():
+            if '	' in l and l[0] in 'ms': ui |= set(l.split('	', 1)[1])
+    for bl in dbnames.blocks(db_ko):
+        ui |= set(db_ko[bl[1]:bl[2]].decode('utf-8'))
+    ui_chars = [c for c in hangul if c in ui]
+    print('hangul chars', len(hangul), 'mapped to U+%04X..U+%04X' % (slots[0], slots[len(hangul) - 1]))
     # 1) 텍스트
-    newblf = {}; used = set()
+    newblf = {}
     miss = 0
     for name in ENGLISH_BLF:
         raw = open('work/blf/%s.blf' % name, 'rb').read()
         texts = {}
-        for k, h, s in blf.parse(raw):
-            if s in tr:
-                texts[h] = tr[s]; used |= set(tr[s])
-            elif re.search('[A-Za-z]', s) and not s.startswith('Medius'):
+        for k, h, s_ in blf.parse(raw):
+            if s_ in tr:
+                texts[h] = enc(tr[s_])
+            elif re.search('[A-Za-z]', s_) and not s_.startswith('Medius'):
                 miss += 1
         newblf[int(name, 16)] = blf.rebuild(raw, texts)
-    used |= set('한국어')
-    # 드라이버·팀 데이터베이스(이름·짧은 표기·팀명·출생지 등)
-    d, e = wad.read('work/orig/DATA2006/STARTUP.WAD'); m = {x[0]: x for x in e}
-    raw = lzss.get(d, m[0x873A829C])
-    newdb = dbnames.rebuild(raw, names_db.convert)
-    if os.environ.get('DB_KO'):
-        for b in dbnames.blocks(newdb):
-            used |= set(newdb[b[1]:b[2]].decode('utf-8'))
     print('untranslated', miss)
-    hangul = sorted(c for c in used if 0xAC00 <= ord(c) <= 0xD7A3)
-    if os.environ.get('LIMIT_HANGUL'): hangul = hangul[:int(os.environ['LIMIT_HANGUL'])]
-    print('hangul chars', len(hangul))
+    # 드라이버·팀 데이터베이스(짧은 표기·표시용 성·팀 이름)
+    newdb = dbnames.rebuild(rawdb, lambda ss: [enc(x) for x in names_db.convert(ss)])
     # 2) 폰트
     newfont = {}
     for fn in FONTS:
@@ -108,17 +123,17 @@ def main():
         f = bft.parse(raw)
         other = sorted(c for c in used if ord(c) > 0x7e and not (0xAC00 <= ord(c) <= 0xD7A3) and ord(c) not in f.glyphs)
         if other: print('  missing glyphs in', fn, other)
-        kfont.add_hangul(f, fn, hangul)
-        if fn.startswith('eurostyle') and 0xC5B4 in f.glyphs: f.glyphs[0x5E] = list(f.glyphs[0xC5B4])
+        full = os.environ.get('FULL_FONTS')
+        chars = ui_chars if kfont.CONF[fn].get('ui') else hangul
+        kfont.add_hangul(f, fn, chars if not full or fn in full.split(',') else chars[:1], codes=cmap)
         newfont[wad.h('Fonts/%s.bft' % fn)] = bft.build(f)
         kfont.preview(f, 'work/out/font_%s.png' % fn)
         print('  font', fn, f.W, f.H, len(newfont[wad.h('Fonts/%s.bft' % fn)]))
     repl = dict(newblf); repl.update(newfont)
-    # 드라이버·팀 DB에 한글을 넣으면 레이스 로딩이 멈춘다(레이스 코드가 3바이트 UTF-8 미지원). DB_KO=1 일 때만 적용
-    if os.environ.get("DB_KO"): repl[0x873A829C] = newdb
+    if not os.environ.get('NO_DB'): repl[0x873A829C] = newdb
     # 언어 선택 메뉴 스크립트: ENGLISH -> 한국어 (u8 형식 4, u32 길이(NUL 포함), 문자열)
     old = b'\x04\x08\x00\x00\x00ENGLISH\x00'
-    ko = '한국^'.encode('utf-8')    # 길이 고정(7바이트): '^' 글리프를 '어'로 바꿔 '한국어'로 표시
+    ko = enc('한국어 ').encode('utf-8')    # 길이 고정(7바이트): 재배정한 한글은 2바이트 -> '한국어 '
     new = b'\x04' + struct.pack('<I', len(ko) + 1) + ko + b'\x00'
     for w in ('STARTUP', 'F12006'):
         d, e = wad.read('work/orig/DATA2006/%s.WAD' % w)
