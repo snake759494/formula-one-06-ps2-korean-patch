@@ -1,11 +1,11 @@
 {
- "version": "v1.2",
- "asset": "Formula_One_06_PS2_KO_v1.2.xdelta",
- "asset_size": 588159912,
- "asset_sha256": "769e6c4a8ed253e1d6998d0bfcdfff1bfb901aacc41f74323961ea77d18b9d04",
+ "version": "v1.3",
+ "asset": "Formula_One_06_PS2_KO_v1.3.xdelta",
+ "asset_size": 588185446,
+ "asset_sha256": "23911d4758fb8c942f2a1a1be61691d0d94ae2afa90863c2fd8b76aebd3795b5",
  "source_iso_size": 4418568192,
  "source_iso_md5": "b72851d1d58528775fa48a36923d8bb5",
  "source_iso_sha256": "8d90a2b496ed8148a1e591728c4ccd9f4ebac1150cf377d5f3384d14211f54ef",
- "result_iso_size": 4684978176,
- "result_iso_sha256": "2bd28216b15dd75530105d42c1ac2a72ed7e72a104eb584280f0dc6d72e0e4a6"
+ "result_iso_size": 4685305856,
+ "result_iso_sha256": "a834ed57d0099327d5ae64b30c97b364d1ae269860478a466ba3f910ca21dff4"
 }

@@ -71,6 +71,18 @@ def prepare():
     for fn in FONTS:
         p = 'work/font/F12006_%s.bft' % fn
         if not os.path.exists(p): open(p, 'wb').write(lzss.get(d, m[wad.h('Fonts/%s.bft' % fn)]))
+    # 이름표에 없는 글꼴(이메일·HUD 등): WAD 안의 모든 .bft 형식 항목을 해시로 찾는다
+    known = {wad.h('Fonts/%s.bft' % fn) for fn in FONTS}
+    for w in WADS:
+        d2, e2 = wad.read('work/orig/DATA2006/%s.WAD' % w)
+        for x in e2:
+            h = x[0]; p = 'work/font/x_%08x.bft' % h
+            if h in known or os.path.exists(p) or x[2] > 2000000: continue
+            t = d2[x[1]:x[1] + 64] if x[2] == x[3] else lzss.decompress(d2[x[1]:x[1] + min(x[3], 200)] + bytes(64), 40)
+            if len(t) >= 28 and t[:4] == bytes(4):
+                n1, n2, c2, n3 = struct.unpack_from('<4I', t, 8)
+                if n1 == n2 and c2 == 2 and n3 == n1 + 1 and 10 < n1 < 5000:
+                    open(p, 'wb').write(lzss.get(d2, x))
 
 def main():
     prepare()
@@ -129,6 +141,31 @@ def main():
         newfont[wad.h('Fonts/%s.bft' % fn)] = bft.build(f)
         kfont.preview(f, 'work/out/font_%s.png' % fn)
         print('  font', fn, f.W, f.H, len(newfont[wad.h('Fonts/%s.bft' % fn)]))
+    # 이름표 밖 글꼴은 커리어 이메일용 3종만 한글을 넣는다(전부 넣으면 챔피언십·커리어 로딩이 메모리 부족으로 멈춤)
+    # fruitigerSmall(이메일 본문)은 512x512 이면 커리어·챔피언십이 멈춘다 -> 커리어 텍스트 글자만 512x256 에
+    EXTRA = [int(x, 16) for x in os.environ.get('EXTRA_FONTS', '8e58d4c1').split(',') if x]
+    career = set()
+    for fn_ in glob.glob('translation/ko/ko_*.tsv'):
+        for l in open(fn_, encoding='utf-8').read().splitlines():
+            if '	' in l and l[0] == 'c': career |= set(l.split('	', 1)[1])
+    career |= set('플레이어') | set('한국어')     # 기본 플레이어 이름(이메일 받는 사람)
+    career_chars = [c for c in hangul if c in career]
+    for p in sorted(glob.glob('work/font/x_*.bft')):
+        h = int(p[-12:-4], 16)
+        if h not in EXTRA: continue
+        raw = open(p, 'rb').read()
+        conf = dict(kfont.auto_conf(bft.parse(raw)), maxh=int(os.environ.get('SMALL_MAXH', '256')))
+        chars_x = career_chars
+        while True:                                   # 512x512 에 들어갈 때까지 한글 크기를 줄인다
+            try:
+                f = bft.parse(raw)
+                kfont.add_hangul(f, 'x_%08x' % h, chars_x, codes=cmap, conf=conf)
+                newfont[h] = bft.build(f)
+                print('  font x_%08x' % h, f.W, f.H, 'size', conf['size'], len(newfont[h]))
+                break
+            except AssertionError:
+                if conf['size'] <= 9: print('  skip font x_%08x' % h); break
+                conf = dict(conf, size=conf['size'] - 1)
     repl = dict(newblf); repl.update(newfont)
     # 드라이버·팀 DB에 한글을 넣으면 퀵 레이스 로딩이 멈춘다(v1.1 제보). DB_KO=1 일 때만 적용
     if os.environ.get('DB_KO'): repl[0x873A829C] = newdb

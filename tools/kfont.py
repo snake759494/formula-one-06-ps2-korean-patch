@@ -19,21 +19,21 @@ TTF = {
 
 # 폰트별 설정: ttf, 한글 글자 크기(px, 정사각 상자), 셀 안 상단 여백(top), 기울임(shear), 자간 여유
 CONF = {
-    'eurostyleLargePx':  dict(ttf='neo_b',  size=14, top=2, ui=True, maxh=512, shear=0, gap=1, boost=1.15),
-    'eurostyleMediumPx': dict(ttf='neo_b',  size=14, top=2, ui=True, maxh=512, shear=0, gap=1, boost=1.15),
+    'eurostyleLargePx':  dict(ttf='neo_b',  size=12, top=3, maxh=512, shear=0, gap=1, boost=1.15),
+    'eurostyleMediumPx': dict(ttf='neo_b',  size=13, top=2, maxh=512, shear=0, gap=1, boost=1.15),
     'eurostyleSmallPx':  dict(ttf='neo_b',  size=13, top=1, shear=0, gap=1),
-    'fruitigerLarge':    dict(ttf='neo_r',  size=14, top=3, ui=True, maxh=512, shear=0, gap=1, boost=1.1),
+    'fruitigerLarge':    dict(ttf='neo_b',  size=12, top=4, maxh=512, shear=0, gap=1, boost=1.1),
     'fruitigerMedium':   dict(ttf='neo_b',  size=12, top=2, shear=0, gap=1, boost=1.15),
     'fruitigerTiny':     dict(ttf='gm9',    size=10, top=0, shear=0, gap=1, pixel=True, maxw=512),
     'Small':             dict(ttf='gm11',   size=11, top=2, shear=0, gap=1, pixel=True, maxw=512, maxh=512),
-    'tv2004_frb':        dict(ttf='neo_b',  size=14, top=3, ui=True, maxh=512, shear=0, gap=1, boost=1.1),
+    'tv2004_frb':        dict(ttf='neo_b',  size=12, top=4, maxh=512, shear=0, gap=1, boost=1.1),
 }
 
 def palette_alpha(f):
     c = f.clut
     i = c.find(bytes.fromhex('0800000002000000520000000000000000'))
     p = c.find(bytes.fromhex('0480000000000008'), i) + 8
-    return [c[p + 4 * k + 3] for k in range(16)]
+    return [c[p + 8 + 4 * k + 3] for k in range(16)]   # 실측: 실제 CLUT 는 8바이트 뒤에서 시작(배경 인덱스가 투명이 되는 위치)
 
 def alpha_to_index(alphas):
     """0..255 -> palette index with nearest alpha (alpha scale 0..0x80)."""
@@ -88,7 +88,9 @@ PAL = {   # 원본 폰트 팔레트의 알파값(인덱스 0~15)
     'fruitigerMedium':   [0, 0, 0, 0x3d, 0x68, 0x17, 0x54, 0x78, 0x29, 0x08, 0x5f, 0x47, 0x20, 0x33, 0x80, 0x6f],
     'fruitigerTiny':     [0, 0, 0x56, 0x35, 0x63, 0x14, 0x4c, 0x74, 0x24, 0x07, 0x00, 0x43, 0x6d, 0x7d, 0x2e, 0x1b],
 }
-FAMILY = {n: ['eurostyleMediumPx', 'eurostyleLargePx'] for n in ('eurostyleMediumPx', 'eurostyleLargePx')}   # 실측: 이 둘은 CLUT 공유
+PAL['x_8e58d4c1'] = [0, 0, 89, 57, 100, 21, 75, 119, 38, 8, 0, 110, 66, 126, 47, 30]   # fruitigerSmall
+FAMILY = {n: ['eurostyleMediumPx', 'eurostyleLargePx'] for n in ('eurostyleMediumPx', 'eurostyleLargePx')}
+FAMILY['x_8e58d4c1'] = ['x_8e58d4c1', 'fruitigerMedium']   # 실측: 이메일 화면에서 fruitigerMedium 팔레트로 그려짐   # 실측: 이 둘은 CLUT 공유
 FAMILY.update({n: ['fruitigerLarge', 'fruitigerMedium', 'fruitigerTiny'] for n in ('fruitigerLarge', 'fruitigerMedium')})   # 그리드 화면 실측
 
 def robust_lut(name):
@@ -119,16 +121,25 @@ def canonical_palette(f):
         c[p + 4 * k:p + 4 * k + 4] = (rgb if k else b'\0\0\0') + bytes([new[k]])
     f.clut = bytes(c)
 
-def add_hangul(f, name, chars, codes=None):
+def auto_conf(f):
+    """이름 없는 글꼴: 'A' 글자 칸 높이로 한글 크기를 정한다(작으면 갈무리)"""
+    g = f.glyphs.get(0x41) or next(iter(f.glyphs.values()))
+    cell = int(g[1]); size = max(9, min(16, round(cell * 0.8)))
+    top = max(0, (cell - size) // 2)
+    if size <= 10: return dict(ttf='gm9', size=10, top=max(0, top - 1), shear=0, gap=1, pixel=True, maxw=512, maxh=512)
+    if size <= 11: return dict(ttf='gm11', size=11, top=top, shear=0, gap=1, pixel=True, maxw=512, maxh=512)
+    return dict(ttf='neo_b', size=size, top=top, shear=0, gap=1, boost=1.1, maxh=512)
+
+def add_hangul(f, name, chars, codes=None, conf=None):
     """codes: 한글 -> 글꼴에 넣을 코드(레이스 쪽 코드는 U+2200 위 문자를 못 그려서 낮은 영역으로 옮겨 담음)"""
-    conf = CONF[name]
+    conf = conf or CONF[name]
     # 게임은 같은 계열 폰트끼리 CLUT 하나를 공유한다 → 계열 내 모든 팔레트에서 같은 투명도가 나오는 인덱스만 사용
-    lut = robust_lut(name) if name in FAMILY else alpha_to_index(palette_alpha(f))
+    lut = alpha_to_index(palette_alpha(f))
     zero = lut[0]
     glyphs = []
     tid = os.environ.get('FONTID')
     for ch in chars:
-        a = render(str(list(CONF).index(name)) if tid else ch, conf)
+        a = render(str(list(CONF).index(name)) if tid and name in CONF else ch, conf)
         g = lut[np.clip(a, 0, 255).astype(np.uint8)]
         if os.environ.get('PALTEST'):     # 팔레트 측정: 글자 칸을 인덱스 (코드 % 16) 으로 채움
             g = np.full_like(g, lut[0]); g[conf['top']:conf['top'] + conf['size'], 1:-1] = ord(ch) % 16
